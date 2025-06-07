@@ -1,0 +1,10 @@
+{
+    "type": "object",
+    "properties": {
+      "tech_stack": { "type": "string" },
+      "endpoints":  { "type": "array", "items": {"type":"string"} },
+      "infra":      { "type": "string" }
+    },
+    "required": ["tech_stack", "endpoints", "infra"]
+  }
+  

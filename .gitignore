@@ -44,3 +44,7 @@ node_modules/
 
 # ── Logs ─────────────────────────────────────────────────
 *.log
+
+# Terraform state
+infra/**/terraform.tfstate*
+
