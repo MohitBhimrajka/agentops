@@ -1,3 +1,0 @@
-# agentops
-
-Project README.

@@ -1,4 +1,0 @@
-type: SequentialAgent
-name: agentops_root
-children:
-  - interpret_agent 
