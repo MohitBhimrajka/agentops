@@ -1,79 +1,73 @@
-import os
-import uuid
+# app.py
+
 import streamlit as st
 import vertexai
-from vertexai.preview import reasoning_engines
+from vertexai import agent_engines
 
-# --- Configuration ---
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "agentops-dev")
-LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-ENGINE_RESOURCE = os.getenv(
-    "VERTEX_AGENT_ENGINE",
-    "projects/719580855933/locations/us-central1/reasoningEngines/803232826508967936"
+# --- Vertex AI Initialization ---
+vertexai.init(
+    project="agentops-dev",
+    location="us-central1",
+    staging_bucket="gs://mohit-adk"
 )
 
-# --- Initialize Vertex AI SDK ---
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+# --- Deployed Agent Resource ---
+RESOURCE_NAME = "projects/719580855933/locations/us-central1/reasoningEngines/803232826508967936"
 
-# --- Streamlit UI setup ---
-st.set_page_config(page_title="AgentOps Chat", layout="wide")
-st.title("🔎 AgentOps Chat Interface")
-st.markdown("""
-Welcome to your custom ADK-powered chatbot built with Google Vertex AI.
+@st.cache_resource
+def get_remote_app():
+    return agent_engines.get(resource_name=RESOURCE_NAME)
 
-**Instructions:**
-- Set your name using the sidebar.
-- Ask any question using the chat box below.
-- Clear the session anytime to restart the conversation.
-""")
+# --- Streamlit Layout ---
+st.set_page_config(page_title="ADK Agent Chat", page_icon="🤖")
+st.title("🤖 Chat with Your Deployed ADK Agent")
+st.caption("Streaming queries through Vertex AI Agent Engine")
 
-# --- Sidebar controls ---
-st.sidebar.header("Settings")
-user_name = st.sidebar.text_input("Your Name", value="Guest")
+remote_app = get_remote_app()
 
-if st.sidebar.button("🧹 Clear Chat"):
-    st.session_state.clear()
-    st.rerun()
+# --- Session Management ---
+if "session_id" not in st.session_state:
+    session = remote_app.create_session(user_id="streamlit_user")
+    st.session_state.session_id = session["id"]
 
-# --- Initialize or retrieve the reasoning engine session ---
-# This block will now also handle the user_id for the session.
-if "reasoning_engine_session" not in st.session_state:
-    # Generate a unique user ID once per browser session.
-    if "user_id" not in st.session_state:
-        st.session_state["user_id"] = f"st-user-{uuid.uuid4()}"
+session_id = st.session_state.session_id
 
-    # Connect to the deployed Reasoning Engine
-    agent_engine = reasoning_engines.ReasoningEngine(ENGINE_RESOURCE)
+# --- Chat History Management ---
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-    # Create a new session, now passing the required user_id
-    st.session_state["reasoning_engine_session"] = agent_engine.create_session(
-        user_id=st.session_state["user_id"]
-    )
+# Display history
+for role, msg in st.session_state.chat_history:
+    st.chat_message(role).write(msg)
 
-# Initialize message history
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
+# --- Input Box ---
+user_input = st.chat_input("Type your message here...")
 
-# --- Display existing chat messages ---
-for msg in st.session_state["messages"]:
-    role = "user" if msg["author"] == user_name else "assistant"
-    with st.chat_message(role):
-        st.write(msg["content"])
+if user_input:
+    # Show user input
+    st.chat_message("user").write(user_input)
+    st.session_state.chat_history.append(("user", user_input))
 
-# --- Handle new chat input ---
-if user_input := st.chat_input("Type your message..."):
-    # Add user message to chat history and display it
-    st.session_state["messages"].append({"author": user_name, "content": user_input})
-    with st.chat_message("user"):
-        st.write(user_input)
+    # Assistant placeholder
+    assistant_msg = st.chat_message("assistant")
+    response_placeholder = assistant_msg.empty()
+    full_response = ""
 
-    # Query the agent using the session object
-    with st.spinner("Agent is thinking..."):
-        session = st.session_state["reasoning_engine_session"]
-        response = session.query(input=user_input)
+    # Debug log
+    with st.expander("🔍 Agent Event Debug Log"):
+        for event in remote_app.stream_query(
+            user_id="streamlit_user",
+            session_id=session_id,
+            message=user_input
+        ):
+            # Show raw event
+            st.json(event)
 
-    # Add agent response to chat history and display it
-    agent_response_content = response.text
-    st.session_state["messages"].append({"author": "Agent", "content": agent_response_content})
-    with st.chat_message("assistant"):
-        st.write(agent_response_content)
+            # ✅ Safely extract model message
+            if "content" in event and "parts" in event["content"]:
+                parts = event["content"]["parts"]
+                text = parts[0].get("text", "")
+                full_response += text
+                response_placeholder.markdown(full_response)
+
+    st.session_state.chat_history.append(("assistant", full_response))
