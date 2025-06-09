@@ -1,4 +1,5 @@
 import os
+import uuid
 import streamlit as st
 import vertexai
 from vertexai.preview import reasoning_engines
@@ -13,7 +14,6 @@ ENGINE_RESOURCE = os.getenv(
 
 # --- Initialize Vertex AI SDK ---
 vertexai.init(project=PROJECT_ID, location=LOCATION)
-agent_engine = reasoning_engines.ReasoningEngine(ENGINE_RESOURCE)
 
 # --- Streamlit UI setup ---
 st.set_page_config(page_title="AgentOps Chat", layout="wide")
@@ -33,30 +33,47 @@ user_name = st.sidebar.text_input("Your Name", value="Guest")
 
 if st.sidebar.button("🧹 Clear Chat"):
     st.session_state.clear()
-    st.experimental_rerun()
+    st.rerun()
 
-# --- Initialize message and session states ---
+# --- Initialize or retrieve the reasoning engine session ---
+# This block will now also handle the user_id for the session.
+if "reasoning_engine_session" not in st.session_state:
+    # Generate a unique user ID once per browser session.
+    if "user_id" not in st.session_state:
+        st.session_state["user_id"] = f"st-user-{uuid.uuid4()}"
+
+    # Connect to the deployed Reasoning Engine
+    agent_engine = reasoning_engines.ReasoningEngine(ENGINE_RESOURCE)
+
+    # Create a new session, now passing the required user_id
+    st.session_state["reasoning_engine_session"] = agent_engine.create_session(
+        user_id=st.session_state["user_id"]
+    )
+
+# Initialize message history
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
-if "session_id" not in st.session_state:
-    import uuid
-    st.session_state["session_id"] = f"session-{str(uuid.uuid4())}"
-
-# --- Handle chat input ---
-user_input = st.chat_input("Type your message...")
-
-if user_input:
-    st.session_state["messages"].append({"author": user_name, "content": user_input})
-    
-    response = agent_engine.query(
-        input=user_input,
-        config={"configurable": {"session_id": st.session_state["session_id"]}}
-    )
-    
-    st.session_state["messages"].append({"author": "Agent", "content": response.text})
-
-# --- Display full conversation ---
+# --- Display existing chat messages ---
 for msg in st.session_state["messages"]:
     role = "user" if msg["author"] == user_name else "assistant"
-    st.chat_message(role).write(msg["content"])
+    with st.chat_message(role):
+        st.write(msg["content"])
+
+# --- Handle new chat input ---
+if user_input := st.chat_input("Type your message..."):
+    # Add user message to chat history and display it
+    st.session_state["messages"].append({"author": user_name, "content": user_input})
+    with st.chat_message("user"):
+        st.write(user_input)
+
+    # Query the agent using the session object
+    with st.spinner("Agent is thinking..."):
+        session = st.session_state["reasoning_engine_session"]
+        response = session.query(input=user_input)
+
+    # Add agent response to chat history and display it
+    agent_response_content = response.text
+    st.session_state["messages"].append({"author": "Agent", "content": agent_response_content})
+    with st.chat_message("assistant"):
+        st.write(agent_response_content)
